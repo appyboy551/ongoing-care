@@ -1,0 +1,49 @@
+name: Missed check-in cron
+
+# Pings the portal's /api/cron/missed-check-in route every 5 minutes.
+# We use GitHub Actions instead of Vercel Cron because Vercel Hobby caps
+# cron jobs at once per day, which would gut the safety promise of an
+# overdue dose escalating within hours.
+#
+# Required GitHub repository secrets:
+#   APP_URL       Production URL of the portal, e.g. https://ongoing-care.vercel.app
+#   CRON_SECRET   Same value set as CRON_SECRET in Vercel env vars
+#
+# Caveats:
+#   GitHub Actions cron is not guaranteed to fire at the exact minute.
+#   During high-load periods on the shared runners, expect drift of a few
+#   minutes. For a mental health safety system this is acceptable but
+#   imperfect. If precision matters more later, move to a paid service
+#   (Vercel Pro, Upstash QStash, EasyCron) or a small always-on worker.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: missed-check-in
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Hit the missed-check-in endpoint
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "Missing APP_URL or CRON_SECRET secret in repo settings."
+            exit 1
+          fi
+          response=$(curl -sS -o /tmp/body -w "%{http_code}" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/cron/missed-check-in")
+          echo "HTTP $response"
+          cat /tmp/body
+          if [ "$response" != "200" ]; then
+            exit 1
+          fi
