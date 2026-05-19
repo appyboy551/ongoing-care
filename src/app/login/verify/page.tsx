@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { COPY } from "@/content/static-copy";
 
@@ -18,7 +18,30 @@ function sanitiseNext(raw: string | null): string {
   return raw;
 }
 
+// useSearchParams must live inside a Suspense boundary or Next.js bails out
+// of static prerendering. Wrap the form in Suspense so the build can render
+// the route shell statically and hydrate the search-param-dependent piece on
+// the client.
 export default function VerifyPage() {
+  return (
+    <Suspense fallback={<VerifyShell />}>
+      <VerifyForm />
+    </Suspense>
+  );
+}
+
+function VerifyShell() {
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4">
+      <div className="bg-card border border-line rounded-card-lg p-7 w-full max-w-md">
+        <h1 className="text-xl font-bold mb-1">Enter your code</h1>
+        <p className="text-ink-soft text-sm mb-5">{COPY.loginCodeIntro}</p>
+      </div>
+    </div>
+  );
+}
+
+function VerifyForm() {
   const router = useRouter();
   const params = useSearchParams();
   const email = params.get("email") ?? "";
