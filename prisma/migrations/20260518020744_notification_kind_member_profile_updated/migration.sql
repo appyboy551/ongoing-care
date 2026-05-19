@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "NotificationKind" ADD VALUE 'MEMBER_PROFILE_UPDATED';

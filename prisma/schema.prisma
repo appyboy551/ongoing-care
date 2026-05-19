@@ -1,0 +1,435 @@
+// Ongoing Care, Support Network Portal
+// Postgres + Prisma. Run `prisma migrate dev` to apply.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------------
+// Access tiers
+// ------------------------------------------------------------
+enum Tier {
+  ADMIN
+  FULL_MEDICAL
+  SHARED
+}
+
+// Person in the support network. Includes David (ADMIN) and the seven members.
+model Member {
+  id            String   @id @default(cuid())
+  fullName      String
+  shortName     String?
+  email         String   @unique
+  phone         String?
+  relationship  String?
+  tier          Tier
+  isActive      Boolean  @default(true)
+  isFrontDoorKeyHolder Boolean @default(false)
+  profileConfirmedAt DateTime?
+  onboardingCompletedAt DateTime?
+  invitedAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sessions      Session[]
+  otpRequests   OtpRequest[]
+  auditEntries  AuditEntry[]
+  publishSignoffs ContentPublish[] @relation("Publisher")
+  flaggedCalls  DistressingCallFlag[]
+}
+
+// Email OTP sent to a member. Single-use, time-limited.
+model OtpRequest {
+  id          String   @id @default(cuid())
+  member      Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  memberId    String
+  // Hashed code, never the raw value.
+  codeHash    String
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([memberId, expiresAt])
+}
+
+// Server-side session for an authenticated member.
+model Session {
+  id          String   @id @default(cuid())
+  member      Member   @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  memberId    String
+  // Random token stored in HTTP-only cookie. Hash on disk.
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([memberId, expiresAt])
+}
+
+// ------------------------------------------------------------
+// Care plan content (live, editable)
+// ------------------------------------------------------------
+
+// A draft / published version of a section of the plan.
+// Sections are keyed by slug, e.g. "medications", "action-plan-steps".
+model ContentSection {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  title       String
+  // Plain markdown body. Rendered server-side.
+  body        String
+  // Tier the section belongs to.
+  tier        Tier     @default(SHARED)
+  // True if this is the live published version visible to readers.
+  isPublished Boolean  @default(false)
+  updatedAt   DateTime @updatedAt
+  publishes   ContentPublish[]
+}
+
+// Audit trail for content publishes. Captures sign-off.
+model ContentPublish {
+  id           String   @id @default(cuid())
+  section      ContentSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  sectionId    String
+  publishedBy  Member   @relation("Publisher", fields: [publishedById], references: [id])
+  publishedById String
+  bodySnapshot String
+  notifyResult Json?
+  createdAt    DateTime @default(now())
+}
+
+// ------------------------------------------------------------
+// Medications
+// ------------------------------------------------------------
+model Medication {
+  id          String   @id @default(cuid())
+  name        String
+  dose        String
+  schedule    String?
+  notes       String?
+  tier        Tier     @default(FULL_MEDICAL)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  pharmacistReviews PharmacistReview[]
+}
+
+// Pharmacist review of the medication combination.
+model PharmacistReview {
+  id          String   @id @default(cuid())
+  medication  Medication? @relation(fields: [medicationId], references: [id])
+  medicationId String?
+  reviewerName String
+  reviewDate  DateTime
+  outcome     String
+  notes       String?
+  createdAt   DateTime @default(now())
+}
+
+// ------------------------------------------------------------
+// Care team and programs
+// ------------------------------------------------------------
+model CareTeamMember {
+  id           String   @id @default(cuid())
+  name         String
+  role         String
+  organisation String?
+  phone        String?
+  email        String?
+  address      String?
+  isCurrent    Boolean  @default(true)
+  notes        String?
+}
+
+model Program {
+  id           String   @id @default(cuid())
+  name         String
+  runBy        String
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+  isActive     Boolean  @default(true)
+}
+
+model Admission {
+  id          String   @id @default(cuid())
+  hospital    String
+  startDate   DateTime
+  endDate     DateTime?
+  reason      String?
+  voluntary   Boolean   @default(true)
+  notes       String?
+}
+
+// ------------------------------------------------------------
+// Seroquel log and the action plan state machine
+// ------------------------------------------------------------
+
+// Each row is one logged dose after a distressing event.
+model SeroquelLog {
+  id          String   @id @default(cuid())
+  // 25 or 50, the only two doses in the plan.
+  doseMg      Int
+  takenAt     DateTime @default(now())
+  // Optional location captured at log time.
+  locationLat Float?
+  locationLng Float?
+  locationAccuracyM Float?
+  locationTakenAt DateTime?
+
+  // Trigger taps. Stored as JSON arrays of slugs (multi-select).
+  stressors   Json
+  emotions    Json
+
+  // Context.
+  inFacility       Boolean
+  facilityName     String?
+
+  // Reflection.
+  severity         Int     // 1-5
+  drivingThis      String? // specific-event | build-up | no-clear-reason | dont-know
+  whatWouldHelp    String? // rest | check-on-me | left-alone | not-sure
+  reflectionNote   String?
+
+  // Plan state derived from this log.
+  timerHours       Int     // copy of the configured timer at the time of log
+  expectedCheckInBy DateTime
+  checkedInAt      DateTime?
+  closedAt         DateTime?
+  closedNote       String?
+
+  // Email notification result.
+  notifyResult     Json?
+
+  // Set by the missed-check-in cron the first time it fires escalation for this log.
+  // Keeps the cron idempotent so re-runs do not double-email the network.
+  escalatedAt      DateTime?
+
+  // Acknowledgement timestamp for the in-app dose-pattern alert modal. Server-side
+  // source of truth so a dismissal on one device propagates to all devices. Phase 0
+  // safety fix: replaces a per-tab sessionStorage flag that could not be trusted.
+  alertAcknowledgedAt DateTime?
+
+  // Audit fields.
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([takenAt])
+  @@index([expectedCheckInBy])
+  @@index([escalatedAt])
+}
+
+// A distressing call flagged by any network member. Arms the no-contact backstop.
+model DistressingCallFlag {
+  id          String   @id @default(cuid())
+  flaggedBy   Member   @relation(fields: [flaggedById], references: [id])
+  flaggedById String
+  flaggedAt   DateTime @default(now())
+  context     String?
+  // Resolution: David checked in / safe / escalated.
+  resolvedAt  DateTime?
+  resolution  String?
+}
+
+// ------------------------------------------------------------
+// Clinician access, per-clinician, time-limited
+// ------------------------------------------------------------
+model ClinicianAccessGrant {
+  id           String   @id @default(cuid())
+  clinicianName String
+  clinicianRole String?
+  organisation String?
+  // Hashed access token. Sent to clinician's email out of band.
+  tokenHash    String   @unique
+  issuedAt     DateTime @default(now())
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  // Last time the clinician used the grant.
+  lastUsedAt   DateTime?
+  // What scope the grant gives. Default: full medical report read-only.
+  scope        String   @default("MEDICAL_REPORT_READ")
+  reason       String?  // Why the grant was issued
+  issuedByEmail String  // David's email at the time of issuance
+}
+
+// ------------------------------------------------------------
+// Live case tracker
+// One case per incident (Seroquel log or distressing-call flag).
+// All network members see the same live state. Any member can update steps.
+// Only the admin can close a case.
+// ------------------------------------------------------------
+enum CaseOrigin {
+  SEROQUEL_LOG
+  DISTRESSING_CALL_FLAG
+}
+
+enum CaseStatus {
+  OPEN
+  RESOLVED
+  ESCALATED
+}
+
+enum StepStatus {
+  PENDING
+  ACTIVE
+  DONE
+  SKIPPED
+  NA
+}
+
+model Case {
+  id              String   @id @default(cuid())
+  title           String
+  status          CaseStatus @default(OPEN)
+  origin          CaseOrigin
+  originSeroquelLogId String?
+  originDistressingCallFlagId String?
+  openedAt        DateTime @default(now())
+  closedAt        DateTime?
+  closedById      String?
+  closedReason    String?
+  // Last activity. Used to drive the "live" UI.
+  lastActivityAt  DateTime @default(now())
+
+  steps           CaseStep[]
+  events          CaseEvent[]
+
+  @@index([status, openedAt])
+}
+
+model CaseStep {
+  id           String   @id @default(cuid())
+  case         Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  caseId       String
+  order        Int
+  stepKey      String
+  title        String
+  description  String?
+  status       StepStatus @default(PENDING)
+  completedAt  DateTime?
+  completedById String?
+  completedByLabel String?
+  note         String?
+  updatedAt    DateTime @updatedAt
+
+  @@index([caseId, order])
+}
+
+// Free-form timeline events on a case (notifications sent, member viewed it, note added, etc.)
+model CaseEvent {
+  id           String   @id @default(cuid())
+  case         Case     @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  caseId       String
+  kind         String   // e.g., "STEP_UPDATED", "NOTIFICATION_SENT", "NOTE_ADDED", "CASE_OPENED", "CASE_CLOSED"
+  actorId      String?
+  actorLabel   String?
+  message      String   // human-readable line
+  detail       Json?
+  createdAt    DateTime @default(now())
+
+  @@index([caseId, createdAt])
+}
+
+// ------------------------------------------------------------
+// Notifications outbox (email, with SMS stub for later)
+// ------------------------------------------------------------
+enum NotificationKind {
+  SEROQUEL_LOG
+  CHECK_IN_REMINDER
+  CHECK_IN_MISSED
+  DISTRESSING_CALL_FLAGGED
+  CONTENT_PUBLISHED
+  PLAN_CLOSED
+  CLINICIAN_GRANT_ISSUED
+  MONTHLY_UPDATE
+  MEMBER_PROFILE_UPDATED
+  MEMBER_INVITED
+  MEMBER_ONBOARDED
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  kind        NotificationKind
+  toEmail     String
+  toName      String?
+  subject     String
+  bodyText    String
+  bodyHtml    String?
+  status      NotificationStatus @default(QUEUED)
+  sentAt      DateTime?
+  errorText   String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  @@index([status, createdAt])
+}
+
+// ------------------------------------------------------------
+// Settings, key/value, admin-editable
+// ------------------------------------------------------------
+model Setting {
+  key         String   @id
+  value       String
+  updatedAt   DateTime @updatedAt
+}
+
+// ------------------------------------------------------------
+// Audit log, append-only
+// ------------------------------------------------------------
+enum AuditKind {
+  LOGIN_OTP_REQUESTED
+  LOGIN_OTP_VERIFIED
+  LOGIN_OTP_FAILED
+  LOGOUT
+  CONTENT_DRAFT_SAVED
+  CONTENT_PUBLISHED
+  SEROQUEL_LOGGED
+  SEROQUEL_CHECKIN
+  CHECK_IN_MISSED
+  DISTRESSING_CALL_FLAGGED
+  PLAN_CLOSED
+  SETTING_CHANGED
+  CLINICIAN_GRANT_ISSUED
+  CLINICIAN_GRANT_USED
+  CLINICIAN_GRANT_REVOKED
+  MEMBER_ACCESS_REVOKED
+  PII_VIEW
+  MEMBER_PROFILE_CONFIRMED
+  MEMBER_PHONE_UPDATED
+  MEMBER_INVITED
+  IMPERSONATION_STARTED
+  IMPERSONATION_ENDED
+  MEMBER_ONBOARDED
+}
+
+model AuditEntry {
+  id          String   @id @default(cuid())
+  kind        AuditKind
+  actor       Member?  @relation(fields: [actorId], references: [id])
+  actorId     String?
+  // For clinician or system actors who are not Members.
+  actorLabel  String?
+  ipAddress   String?
+  userAgent   String?
+  detail      Json?
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([kind, createdAt])
+}

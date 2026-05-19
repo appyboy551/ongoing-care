@@ -1,0 +1,40 @@
+node_modules/
+.next/
+out/
+
+# Env files (anything with secrets)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+
+# Coverage
+coverage/
+
+# Vercel
+.vercel
+
+# Prisma local migration scratch
+prisma/migrations/dev-*
+
+# ---------------------------------------------------------------------------
+# Privacy: keep David's real seed data and any local-only data files out of git.
+# Only the *.example.ts templates get committed. Real values stay on local disk.
+# ---------------------------------------------------------------------------
+scripts/seed.ts
+scripts/seed-local.ts
+.private/
+src/data/*.local.ts
+
+# IDE
+.vscode/
+.idea/
+
+# Misc local scratch
+tmp/
+*.bak
