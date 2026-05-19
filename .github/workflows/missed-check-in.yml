@@ -4,17 +4,6 @@ name: Missed check-in cron
 # We use GitHub Actions instead of Vercel Cron because Vercel Hobby caps
 # cron jobs at once per day, which would gut the safety promise of an
 # overdue dose escalating within hours.
-#
-# Required GitHub repository secrets:
-#   APP_URL       Production URL of the portal, e.g. https://ongoing-care.vercel.app
-#   CRON_SECRET   Same value set as CRON_SECRET in Vercel env vars
-#
-# Caveats:
-#   GitHub Actions cron is not guaranteed to fire at the exact minute.
-#   During high-load periods on the shared runners, expect drift of a few
-#   minutes. For a mental health safety system this is acceptable but
-#   imperfect. If precision matters more later, move to a paid service
-#   (Vercel Pro, Upstash QStash, EasyCron) or a small always-on worker.
 
 on:
   schedule:
@@ -34,8 +23,7 @@ jobs:
         env:
           APP_URL: ${{ secrets.APP_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-         run: |
-          # Strip trailing whitespace that GitHub secrets pick up from textarea paste.
+        run: |
           APP_URL=$(printf %s "$APP_URL" | tr -d '[:space:]')
           CRON_SECRET=$(printf %s "$CRON_SECRET" | tr -d '[:space:]')
           if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
