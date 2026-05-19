@@ -34,7 +34,10 @@ jobs:
         env:
           APP_URL: ${{ secrets.APP_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
-        run: |
+         run: |
+          # Strip trailing whitespace that GitHub secrets pick up from textarea paste.
+          APP_URL=$(printf %s "$APP_URL" | tr -d '[:space:]')
+          CRON_SECRET=$(printf %s "$CRON_SECRET" | tr -d '[:space:]')
           if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
             echo "Missing APP_URL or CRON_SECRET secret in repo settings."
             exit 1
