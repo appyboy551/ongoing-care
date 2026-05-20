@@ -3,7 +3,105 @@
 
 import { db } from "./db";
 import { writeAudit } from "./audit";
+import { sendEmail } from "./email";
+import { sendSms } from "./sms";
+import { formatAuTime } from "./format";
 import { CaseOrigin, StepStatus } from "@prisma/client";
+
+function appUrl(): string {
+  return process.env.APP_URL ?? "http://localhost:3000";
+}
+
+// Fire-and-forget notification hooks triggered by specific step transitions.
+// Kept separate from updateCaseStep's transactional core so a notification
+// failure cannot prevent the step from being marked done.
+
+async function notifyHospitalHandoverActivated(caseId: string) {
+  // Triggered when "welfare-check" is marked DONE (hospital-handover then
+  // becomes ACTIVE). Key-holders get the meds list, NoK info, case link, and
+  // a deep-link to the police-script PDF for paramedic / hospital handover.
+  const [keyHolders, meds, caseRow] = await Promise.all([
+    db.member.findMany({
+      where: { isFrontDoorKeyHolder: true, isActive: true },
+    }),
+    db.medication.findMany({
+      where: { isActive: true, tier: "FULL_MEDICAL" },
+      select: { name: true, dose: true, schedule: true },
+    }),
+    db.case.findUnique({ where: { id: caseId }, select: { title: true } }),
+  ]);
+  if (keyHolders.length === 0) return;
+
+  const policeScriptUrl = `${appUrl()}/cases/${caseId}/police-script`;
+  const policeScriptPdfUrl = `${appUrl()}/api/cases/${caseId}/police-script/pdf`;
+  const medsLine = meds.length
+    ? meds.map((m) => `${m.name} ${m.dose}${m.schedule ? ` (${m.schedule})` : ""}`).join(", ")
+    : "(no active medications recorded - confirm with Bron or Joanna)";
+
+  for (const kh of keyHolders) {
+    const greeting = kh.shortName ?? kh.fullName;
+    await sendEmail({
+      kind: "CHECK_IN_MISSED",
+      to: kh.email,
+      toName: greeting,
+      subject: `Hospital handover step is now active${caseRow ? ` - ${caseRow.title}` : ""}`,
+      bodyText: [
+        `Hi ${greeting},`,
+        ``,
+        `The welfare-check step is complete. The hospital-handover step is now active.`,
+        ``,
+        `If David needs to go to hospital, take this with you:`,
+        `Current medications: ${medsLine}`,
+        `Next of kin: Bron and Joanna. They can speak to the clinical team.`,
+        `Nearest psychiatric emergency care: St Vincent's Hospital - go to ED or the mental health unit.`,
+        ``,
+        `Full case and live activity log: ${appUrl()}/cases/${caseId}`,
+        `Police-script (web): ${policeScriptUrl}`,
+        `Police-script (PDF download): ${policeScriptPdfUrl}`,
+        ``,
+        `If you cannot transport David yourself, call 000 and request a welfare check or ambulance.`,
+      ].join("\n"),
+      metadata: { caseId, step: "hospital-handover" },
+    });
+
+    if (kh.phone) {
+      await sendSms({
+        to: kh.phone,
+        bodyText: `Hospital-handover step active. Take meds info and police-script (PDF in email). Open: ${appUrl()}/cases/${caseId}`,
+      });
+    }
+  }
+}
+
+async function notifyMemberLocated(args: {
+  caseId: string;
+  actorName: string;
+}) {
+  // Triggered when "located" is marked DONE. Emails every active member with
+  // a short confirmation. Reuses PLAN_CLOSED kind (David's call - close
+  // enough in intent and avoids an enum migration).
+  const allMembers = await db.member.findMany({
+    where: { isActive: true },
+  });
+  const at = formatAuTime(new Date());
+  for (const m of allMembers) {
+    const greeting = m.shortName ?? m.fullName;
+    await sendEmail({
+      kind: "PLAN_CLOSED",
+      to: m.email,
+      toName: greeting,
+      subject: "David has been located",
+      bodyText: [
+        `Hi ${greeting},`,
+        ``,
+        `${args.actorName} has marked David as located at ${at}.`,
+        ``,
+        `Open the case for details and next steps: ${appUrl()}/cases/${args.caseId}`,
+      ].join("\n"),
+      metadata: { caseId: args.caseId, step: "located" },
+    });
+  }
+}
 
 // Step template used for both Seroquel-log and distressing-call-flag origins.
 // Phone numbers are read from the Member table at case-creation time so the
@@ -213,6 +311,28 @@ export async function updateCaseStep(args: {
       message: `${args.actor.name} marked "${step.title}" as ${args.newStatus.toLowerCase()}${args.note ? `: ${args.note}` : ""}.`,
     },
   });
+
+  // Notification hooks for specific step transitions. Wrapped in try/catch
+  // so a notification failure cannot prevent the step transition from
+  // returning successfully to the caller. Failures are surfaced via the
+  // Notification row's FAILED status.
+  if (args.newStatus === "DONE") {
+    if (step.stepKey === "welfare-check") {
+      try {
+        await notifyHospitalHandoverActivated(args.caseId);
+      } catch {
+        // Swallowed - email/SMS layer logs its own failures to the
+        // Notification table. Step transition stands.
+      }
+    } else if (step.stepKey === "located") {
+      try {
+        await notifyMemberLocated({ caseId: args.caseId, actorName: args.actor.name });
+      } catch {
+        // Swallowed - see above.
+      }
+    }
+  }
+
   return step;
 }
 

@@ -6,6 +6,7 @@ import { sendEmail } from "@/lib/email";
 import { writeAudit } from "@/lib/audit";
 import { formatAuTime } from "@/lib/format";
 import { openCaseForCallFlag } from "@/lib/cases";
+import { getSettingNumber } from "@/lib/settings";
 
 const Body = z.object({ context: z.string().max(500).nullable() });
 
@@ -21,10 +22,16 @@ export async function POST(req: NextRequest) {
   const parsed = Body.safeParse(json);
   if (!parsed.success) return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
 
+  // Arm the no-contact backstop using the same window as the Seroquel timer
+  // (admin-configurable via Setting "seroquel.timer.hours", default 14h).
+  // If David does not acknowledge within this window, the cron escalates the
+  // flag-only path identically to a missed Seroquel check-in.
+  const timerHours = await getSettingNumber("seroquel.timer.hours", 14);
   const flag = await db.distressingCallFlag.create({
     data: {
       flaggedById: viewer.id,
       context: parsed.data.context ?? undefined,
+      expectedResponseBy: new Date(Date.now() + timerHours * 3_600_000),
     },
   });
 

@@ -5,6 +5,7 @@ import { useState } from "react";
 const FIELDS = [
   { key: "seroquel.timer.hours", label: "Seroquel timer (hours)", type: "number" },
   { key: "seroquel.sedation.assumption.hours", label: "Assumed sedation duration (hours)", type: "number" },
+  { key: "escalation.second-tier.hours", label: "Second-tier escalation delay (hours, default 1)", type: "number" },
   { key: "financial.status", label: "Financial status", type: "select", options: ["Stable", "Strained", "Unstable", "In crisis"] },
   { key: "insurer.name", label: "Insurer name", type: "text" },
   { key: "insurer.coverage", label: "Insurer coverage description", type: "text" },

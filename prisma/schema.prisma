@@ -215,6 +215,11 @@ model SeroquelLog {
   // Keeps the cron idempotent so re-runs do not double-email the network.
   escalatedAt      DateTime?
 
+  // Set by the cron the first time it fires second-tier escalation (when the
+  // network has not responded after the configured second-tier window).
+  // Idempotency guard for the second-tier block.
+  escalatedTwiceAt DateTime?
+
   // Acknowledgement timestamp for the in-app dose-pattern alert modal. Server-side
   // source of truth so a dismissal on one device propagates to all devices. Phase 0
   // safety fix: replaces a per-tab sessionStorage flag that could not be trusted.
@@ -227,6 +232,7 @@ model SeroquelLog {
   @@index([takenAt])
   @@index([expectedCheckInBy])
   @@index([escalatedAt])
+  @@index([escalatedTwiceAt])
 }
 
 // A distressing call flagged by any network member. Arms the no-contact backstop.
@@ -239,6 +245,17 @@ model DistressingCallFlag {
   // Resolution: David checked in / safe / escalated.
   resolvedAt  DateTime?
   resolution  String?
+
+  // Computed at flag-creation time from the configured Seroquel timer
+  // (defaults to 14h). The cron escalates flag-only paths whose response
+  // window has passed and that have not been resolved or escalated.
+  expectedResponseBy DateTime?
+  // Set the first time the cron fires the flag-only escalation. Idempotency
+  // guard - same pattern as SeroquelLog.escalatedAt.
+  escalatedAt        DateTime?
+
+  @@index([expectedResponseBy])
+  @@index([escalatedAt])
 }
 
 // ------------------------------------------------------------

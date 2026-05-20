@@ -4,10 +4,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentMember } from "@/lib/auth";
+import { db } from "@/lib/db";
 import ShellLayout from "@/components/Layout/ShellLayout";
 import { ADMIN_NAV } from "@/content/navigation";
 import { Card, PageHead, Pill, SectionTitle } from "@/components/ui/Card";
 import CheckInButton from "@/components/CheckInButton";
+import ClearFlagButton from "@/components/ClearFlagButton";
 import { getActionPlanState } from "@/lib/timer";
 import { formatAuTime, hoursAndMinutes } from "@/lib/format";
 
@@ -17,10 +19,43 @@ export default async function CheckIn() {
   const viewer = await getCurrentMember();
   if (!viewer || viewer.tier !== "ADMIN") redirect("/dashboard");
   const state = await getActionPlanState();
+  // A flag is "open" until David clears it, logs Seroquel (which also resolves
+  // it on check-in), or the cron escalates it. Surfaced here so David can
+  // silence the no-contact backstop without logging a dose.
+  const openFlag = await db.distressingCallFlag.findFirst({
+    where: { resolvedAt: null },
+    orderBy: { flaggedAt: "desc" },
+    include: { flaggedBy: { select: { fullName: true, shortName: true } } },
+  });
 
   return (
     <ShellLayout nav={ADMIN_NAV} currentPath="/admin/check-in" viewerTier="ADMIN" viewerName={viewer.shortName ?? viewer.fullName}>
       <PageHead title="Check in" sub="Tell the network you're okay." />
+
+      {openFlag ? (
+        <section className="mb-6">
+          <SectionTitle>Distressing-call flag is armed</SectionTitle>
+          <Card>
+            <div className="flex items-center gap-2 mb-3">
+              <Pill tone="amber">Flag open</Pill>
+              <span className="text-[14px] text-ink-soft">
+                Flagged by {openFlag.flaggedBy.shortName ?? openFlag.flaggedBy.fullName} at {formatAuTime(openFlag.flaggedAt)}
+              </span>
+            </div>
+            {openFlag.context ? (
+              <p className="text-[13.5px] mb-3 bg-bg p-2 rounded border border-line">
+                Context: {openFlag.context}
+              </p>
+            ) : null}
+            {openFlag.expectedResponseBy ? (
+              <p className="text-[13.5px] mb-3 text-ink-soft">
+                No-contact window expires at <strong>{formatAuTime(openFlag.expectedResponseBy)}</strong>. If you don't clear this or log a dose by then, the action plan escalates automatically.
+              </p>
+            ) : null}
+            <ClearFlagButton />
+          </Card>
+        </section>
+      ) : null}
 
       <section className="mb-6">
         <SectionTitle>Status</SectionTitle>
