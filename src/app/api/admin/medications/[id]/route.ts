@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/tier";
@@ -22,6 +23,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const existing = await db.medication.findUnique({ where: { id: params.id } });
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
   await db.medication.update({ where: { id: params.id }, data: parsed.data });
+  revalidateTag("medications");
   return NextResponse.json({ ok: true });
 }
 
@@ -34,5 +36,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   // Cascade safety: pharmacist reviews reference medication. Set FK to null on delete via update first.
   await db.pharmacistReview.updateMany({ where: { medicationId: params.id }, data: { medicationId: null } });
   await db.medication.delete({ where: { id: params.id } });
+  revalidateTag("medications");
   return NextResponse.json({ ok: true });
 }

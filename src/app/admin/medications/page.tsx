@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { unstable_cache } from "next/cache";
 import { db } from "@/lib/db";
 import { getCurrentMember } from "@/lib/auth";
 import ShellLayout from "@/components/Layout/ShellLayout";
@@ -8,10 +9,20 @@ import { NewMedicationForm, EditMedicationForm } from "./MedicationForm";
 
 export const dynamic = "force-dynamic";
 
+// The medication list is identical across all admin sessions and changes only
+// when David adds, edits or deletes. The write routes call revalidateTag(
+// "medications") so the page reflects changes immediately - the 5-minute TTL
+// is the staleness backstop, not the typical refresh interval.
+const getMedications = unstable_cache(
+  async () => db.medication.findMany({ orderBy: [{ isActive: "desc" }, { name: "asc" }] }),
+  ["admin-medications-list-v1"],
+  { tags: ["medications"], revalidate: 300 }
+);
+
 export default async function MedicationsAdmin() {
   const viewer = await getCurrentMember();
   if (!viewer || viewer.tier !== "ADMIN") redirect("/dashboard");
-  const meds = await db.medication.findMany({ orderBy: [{ isActive: "desc" }, { name: "asc" }] });
+  const meds = await getMedications();
   return (
     <ShellLayout nav={ADMIN_NAV} currentPath="/admin/medications" viewerTier="ADMIN" viewerName={viewer.shortName ?? viewer.fullName}>
       <PageHead title="Medications" sub="Active prescriptions and their schedules. Visible per-tier setting." />

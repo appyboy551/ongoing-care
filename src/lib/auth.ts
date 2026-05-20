@@ -1,9 +1,20 @@
 // Session creation and reading. Cookie-based, HTTP-only, signed by storing only the hash on disk.
 
+import * as React from "react";
 import { cookies } from "next/headers";
 import { db } from "./db";
 import { randomToken, sha256 } from "./crypto";
 import { Tier } from "@prisma/client";
+
+// React.cache provides per-request memoization in the Next.js server runtime.
+// In environments where it is not available (notably Vitest's node runtime
+// when a non-React module pulls auth in transitively) we fall back to an
+// identity wrapper so the import does not crash. Tests don't benefit from
+// memoization but they don't need it either.
+type AnyAsyncFn = (...args: unknown[]) => Promise<unknown>;
+const cache: <T extends AnyAsyncFn>(fn: T) => T =
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (React as any).cache ?? (<T extends AnyAsyncFn>(fn: T): T => fn);
 
 const COOKIE_NAME = "ocp_session";
 const GATE_COOKIE = "ocp_needs_confirm";
@@ -98,7 +109,11 @@ export function clearOnboardingGateCookie() {
   cookies().delete(ONBOARDING_COOKIE);
 }
 
-export async function getCurrentMember(): Promise<CurrentMember | null> {
+// Wrapped in React's cache() so a single request that touches the session in
+// multiple places (layout + page + a server action, say) only hits the DB
+// once. cache() is per-request scoped, so concurrent requests still get
+// independent lookups - no cross-user leakage.
+export const getCurrentMember = cache(async (): Promise<CurrentMember | null> => {
   const token = cookies().get(COOKIE_NAME)?.value;
   if (!token) return null;
   const tokenHash = await sha256(token);
@@ -137,13 +152,14 @@ export async function getCurrentMember(): Promise<CurrentMember | null> {
     email: realMember.email,
     tier: realMember.tier,
   };
-}
+});
 
 /**
  * Returns the real admin Member from the session cookie, ignoring any impersonation cookie.
  * Used by the impersonation control endpoints so they cannot be tricked by a stale cookie.
+ * Also cache()-wrapped for per-request memoization.
  */
-export async function getRealAdminFromSession(): Promise<CurrentMember | null> {
+export const getRealAdminFromSession = cache(async (): Promise<CurrentMember | null> => {
   const token = cookies().get(COOKIE_NAME)?.value;
   if (!token) return null;
   const tokenHash = await sha256(token);
@@ -160,7 +176,7 @@ export async function getRealAdminFromSession(): Promise<CurrentMember | null> {
     email: session.member.email,
     tier: session.member.tier,
   };
-}
+});
 
 export function setImpersonationCookie(targetMemberId: string) {
   cookies().set(IMPERSONATE_COOKIE, targetMemberId, {

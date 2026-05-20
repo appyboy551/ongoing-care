@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/tier";
@@ -33,5 +34,6 @@ export async function POST(req: NextRequest) {
       isCurrent: parsed.data.isCurrent ?? true,
     },
   });
+  revalidateTag("care-team");
   return NextResponse.json({ ok: true, id: created.id });
 }

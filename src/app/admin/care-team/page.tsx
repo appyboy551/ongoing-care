@@ -1,6 +1,7 @@
 // Admin: care team management. Add, edit, delete clinicians.
 
 import { redirect } from "next/navigation";
+import { unstable_cache } from "next/cache";
 import { db } from "@/lib/db";
 import { getCurrentMember } from "@/lib/auth";
 import ShellLayout from "@/components/Layout/ShellLayout";
@@ -10,12 +11,18 @@ import { NewCareTeamForm, EditCareTeamForm } from "./CareTeamForm";
 
 export const dynamic = "force-dynamic";
 
+// Care team list is the same for every admin session. Write routes call
+// revalidateTag("care-team") for instant invalidation; the TTL is a backstop.
+const getCareTeam = unstable_cache(
+  async () => db.careTeamMember.findMany({ orderBy: [{ isCurrent: "desc" }, { name: "asc" }] }),
+  ["admin-care-team-list-v1"],
+  { tags: ["care-team"], revalidate: 300 }
+);
+
 export default async function CareTeamAdmin() {
   const viewer = await getCurrentMember();
   if (!viewer || viewer.tier !== "ADMIN") redirect("/dashboard");
-  const team = await db.careTeamMember.findMany({
-    orderBy: [{ isCurrent: "desc" }, { name: "asc" }],
-  });
+  const team = await getCareTeam();
 
   return (
     <ShellLayout nav={ADMIN_NAV} currentPath="/admin/care-team" viewerTier="ADMIN" viewerName={viewer.shortName ?? viewer.fullName}>

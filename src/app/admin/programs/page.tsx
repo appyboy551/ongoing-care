@@ -1,6 +1,7 @@
 // Admin: programs management. ACON, The Way Back, SPOT, etc.
 
 import { redirect } from "next/navigation";
+import { unstable_cache } from "next/cache";
 import { db } from "@/lib/db";
 import { getCurrentMember } from "@/lib/auth";
 import ShellLayout from "@/components/Layout/ShellLayout";
@@ -10,12 +11,18 @@ import { NewProgramForm, EditProgramForm } from "./ProgramForm";
 
 export const dynamic = "force-dynamic";
 
+// Programs list is the same for every admin session. Write routes call
+// revalidateTag("programs") for instant invalidation; the TTL is a backstop.
+const getPrograms = unstable_cache(
+  async () => db.program.findMany({ orderBy: [{ isActive: "desc" }, { name: "asc" }] }),
+  ["admin-programs-list-v1"],
+  { tags: ["programs"], revalidate: 300 }
+);
+
 export default async function ProgramsAdmin() {
   const viewer = await getCurrentMember();
   if (!viewer || viewer.tier !== "ADMIN") redirect("/dashboard");
-  const programs = await db.program.findMany({
-    orderBy: [{ isActive: "desc" }, { name: "asc" }],
-  });
+  const programs = await getPrograms();
 
   return (
     <ShellLayout nav={ADMIN_NAV} currentPath="/admin/programs" viewerTier="ADMIN" viewerName={viewer.shortName ?? viewer.fullName}>

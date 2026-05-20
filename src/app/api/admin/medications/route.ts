@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/tier";
@@ -30,5 +31,6 @@ export async function POST(req: NextRequest) {
       isActive: parsed.data.isActive ?? true,
     },
   });
+  revalidateTag("medications");
   return NextResponse.json({ ok: true, id: created.id });
 }

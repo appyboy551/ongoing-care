@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/tier";
@@ -25,6 +26,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const existing = await db.careTeamMember.findUnique({ where: { id: params.id } });
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
   await db.careTeamMember.update({ where: { id: params.id }, data: parsed.data });
+  revalidateTag("care-team");
   return NextResponse.json({ ok: true });
 }
 
@@ -37,5 +39,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   const existing = await db.careTeamMember.findUnique({ where: { id: params.id } });
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
   await db.careTeamMember.delete({ where: { id: params.id } });
+  revalidateTag("care-team");
   return NextResponse.json({ ok: true });
 }
