@@ -26,13 +26,18 @@ const SYSTEM_ACTOR = { id: "system:cron", name: "Portal (automatic)" };
 // CaseEvent kinds that count as "the network has responded" for the purpose
 // of suppressing second-tier escalation. The respond page writes the three
 // RESPONSE_* kinds; STEP_UPDATED and NOTE_ADDED also count because they
-// indicate someone has engaged with the case.
+// indicate someone has engaged with the case. CASE_CLOSED is included so
+// that an admin closing the case via /api/cases/[id]/close (which does not
+// touch SeroquelLog.closedAt or DistressingCallFlag.resolvedAt) suppresses
+// the URGENT second-tier alert. Without this, closing a case in the UI
+// after first-tier fired would still produce a phantom second-tier storm.
 const RESPONSE_EVENT_KINDS = [
   "RESPONSE_REACHED",
   "RESPONSE_NO_ANSWER",
   "RESPONSE_CALLING_000",
   "NOTE_ADDED",
   "STEP_UPDATED",
+  "CASE_CLOSED",
 ];
 
 export type EscalationResult = {
