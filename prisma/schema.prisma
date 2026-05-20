@@ -253,9 +253,14 @@ model DistressingCallFlag {
   // Set the first time the cron fires the flag-only escalation. Idempotency
   // guard - same pattern as SeroquelLog.escalatedAt.
   escalatedAt        DateTime?
+  // Set the first time the cron fires second-tier escalation for a flag-only
+  // path (when no one in the network responded after the configured
+  // second-tier window). Idempotency guard for the Block 4 second-tier path.
+  escalatedTwiceAt   DateTime?
 
   @@index([expectedResponseBy])
   @@index([escalatedAt])
+  @@index([escalatedTwiceAt])
 }
 
 // ------------------------------------------------------------

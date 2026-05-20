@@ -1,11 +1,13 @@
 // Missed-check-in escalation. Runs on a schedule (GitHub Actions) and reacts
-// to three independent overdue conditions:
+// to four independent overdue conditions:
 //
 //   1. Seroquel logs whose check-in window has expired (first-tier).
 //   2. Distressing-call flags whose no-contact window has expired and no
 //      Seroquel was logged (first-tier, flag-only path - Gap 1).
 //   3. Seroquel-log first-tier escalations that received no case-page
 //      response inside the second-tier window (second-tier - Gap 2).
+//   4. Flag-only first-tier escalations that received no case-page response
+//      inside the second-tier window (second-tier flag-only - Gap 2).
 //
 // Each block writes its idempotency timestamp first, so a partial failure on
 // notification dispatch cannot cause double-escalation on the next tick.
@@ -40,9 +42,12 @@ export type EscalationResult = {
   // First-tier flag-only escalations.
   processedFlags: number;
   escalatedFlags: number;
-  // Second-tier escalations.
+  // Second-tier escalations (Seroquel-log path).
   processedSecondTier: number;
   escalatedSecondTier: number;
+  // Second-tier escalations (flag-only path).
+  processedSecondTierFlags: number;
+  escalatedSecondTierFlags: number;
   // Aggregate dispatch counters.
   emailsSent: number;
   smsAttempted: number;
@@ -57,6 +62,8 @@ function emptyResult(): EscalationResult {
     escalatedFlags: 0,
     processedSecondTier: 0,
     escalatedSecondTier: 0,
+    processedSecondTierFlags: 0,
+    escalatedSecondTierFlags: 0,
     emailsSent: 0,
     smsAttempted: 0,
     smsSent: 0,
@@ -356,12 +363,9 @@ export async function runMissedCheckInEscalation(now = new Date()): Promise<Esca
   }
 
   // ------------------------------------------------------------------
-  // Block 3. Second-tier escalation (Gap 2).
+  // Block 3. Second-tier escalation (Gap 2, Seroquel-log path).
   // For Seroquel logs that were first-tier escalated >= secondTierHours ago
   // and have had zero qualifying CaseEvent activity since first-tier fired.
-  //
-  // NOTE: Flag-only second-tier is not yet wired. The schema would need a
-  // matching escalatedTwiceAt on DistressingCallFlag. Tracked as a follow-up.
   // ------------------------------------------------------------------
   const secondTierHours = await getSettingNumber("escalation.second-tier.hours", 1);
   const secondTierThreshold = new Date(now.getTime() - secondTierHours * 3_600_000);
@@ -492,6 +496,138 @@ export async function runMissedCheckInEscalation(now = new Date()): Promise<Esca
         logId: log.id,
         caseId: linkedCase?.id ?? null,
         tier: "second",
+        secondTierHours,
+      },
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // Block 4. Second-tier escalation (Gap 2, flag-only path).
+  // Mirrors Block 3 but for DistressingCallFlag rows whose first-tier
+  // escalation fired >= secondTierHours ago and that have seen no qualifying
+  // CaseEvent activity since. Same suppression and idempotency pattern.
+  // ------------------------------------------------------------------
+  const dueFlagsForSecondTier = await db.distressingCallFlag.findMany({
+    where: {
+      escalatedAt: { not: null, lt: secondTierThreshold },
+      escalatedTwiceAt: null,
+      resolvedAt: null,
+    },
+    include: { flaggedBy: true },
+    take: 20,
+  });
+
+  for (const flag of dueFlagsForSecondTier) {
+    result.processedSecondTierFlags++;
+
+    const linkedCase = await db.case.findFirst({
+      where: { originDistressingCallFlagId: flag.id },
+    });
+
+    // Same suppression rule as Block 3: skip (without setting the idempotency
+    // flag) if the network has engaged with the case since first-tier fired.
+    // Excludes the cron's own STEP_UPDATED event from Block 2.
+    if (linkedCase && flag.escalatedAt) {
+      const recentResponse = await db.caseEvent.findFirst({
+        where: {
+          caseId: linkedCase.id,
+          createdAt: { gt: flag.escalatedAt },
+          kind: { in: RESPONSE_EVENT_KINDS },
+          NOT: { actorId: SYSTEM_ACTOR.id },
+        },
+      });
+      if (recentResponse) continue;
+    }
+
+    await db.distressingCallFlag.update({
+      where: { id: flag.id },
+      data: { escalatedTwiceAt: now },
+    });
+    result.escalatedSecondTierFlags++;
+
+    const admin = fullMedical.find((m) => m.tier === "ADMIN");
+    const adminName = admin?.shortName ?? admin?.fullName ?? "David";
+    const adminPhone = admin?.phone ?? "(phone not on file)";
+    const keyHolders = shared.filter((m) => m.isFrontDoorKeyHolder);
+    const policeScriptLink = linkedCase
+      ? `${appUrl()}/cases/${linkedCase.id}/police-script`
+      : null;
+
+    for (const m of fullMedical) {
+      const subject = `URGENT: ${adminName} still has not responded after the flagged call. ${secondTierHours}h since first alert.`;
+      const body = [
+        `Hi ${m.shortName ?? m.fullName},`,
+        ``,
+        `${secondTierHours} hour${secondTierHours === 1 ? "" : "s"} have passed since the first alert about the flagged distressing call and no one in the network has logged a response on the case page.`,
+        ``,
+        `If you have not already done so, please attempt to contact ${adminName} on ${adminPhone} now.`,
+        `If he does not answer, the next step is a welfare check at his apartment. ${keyHolders.length ? keyHolders.map((k) => k.shortName ?? k.fullName).join(" and ") : "Front-door key holders"} hold a key.`,
+        `If you cannot reach anyone, call 000 and request a welfare check.`,
+        ``,
+        `Tell the network what you have done: ${caseLink(linkedCase?.id)}`,
+        policeScriptLink ? `` : "",
+        policeScriptLink ? `If you may need to brief police, use the prepared script: ${policeScriptLink}` : "",
+      ].filter((l) => l !== "").join("\n");
+      await sendEmail({
+        kind: "CHECK_IN_MISSED",
+        to: m.email,
+        toName: m.shortName ?? m.fullName,
+        subject,
+        bodyText: body,
+        metadata: { flagId: flag.id, caseId: linkedCase?.id ?? null, tier: "second", origin: "flag-only" },
+      });
+      result.emailsSent++;
+    }
+
+    for (const m of shared) {
+      const isKeyHolder = m.isFrontDoorKeyHolder;
+      if (!isKeyHolder) {
+        // Non-key-holder SHARED members already received the first-tier email
+        // and have no action. Skip the second-tier email to reduce noise.
+        continue;
+      }
+      const subject = `URGENT: ${adminName} still has not responded after the flagged call. ${secondTierHours}h since first alert.`;
+      const body = [
+        `Hi ${m.shortName ?? m.fullName},`,
+        ``,
+        `${secondTierHours} hour${secondTierHours === 1 ? "" : "s"} have passed since the first alert about the flagged distressing call and no one in the network has logged a response.`,
+        ``,
+        `You hold a front-door key. Bron or Joanna may need you for the welfare check. Stay reachable.`,
+        ``,
+        `Open the case: ${caseLink(linkedCase?.id)}`,
+        policeScriptLink ? `Police script (if needed): ${policeScriptLink}` : "",
+      ].filter((l) => l !== "").join("\n");
+      await sendEmail({
+        kind: "CHECK_IN_MISSED",
+        to: m.email,
+        toName: m.shortName ?? m.fullName,
+        subject,
+        bodyText: body,
+        metadata: { flagId: flag.id, caseId: linkedCase?.id ?? null, tier: "second", origin: "flag-only" },
+      });
+      result.emailsSent++;
+    }
+
+    const smsRecipients = [
+      ...fullMedical.filter((m) => m.tier !== "ADMIN" && m.phone),
+      ...keyHolders.filter((m) => m.phone),
+    ];
+    const smsBody = `URGENT: ${adminName} still has not responded after the flagged call. ${secondTierHours}h since first alert. Open: ${caseLink(linkedCase?.id)}`;
+    for (const m of smsRecipients) {
+      if (!m.phone) continue;
+      result.smsAttempted++;
+      const r = await sendSms({ to: m.phone, bodyText: smsBody });
+      if (r.ok) result.smsSent++;
+    }
+
+    await writeAudit({
+      kind: "CHECK_IN_MISSED",
+      actorLabel: "system:cron",
+      detail: {
+        flagId: flag.id,
+        caseId: linkedCase?.id ?? null,
+        tier: "second",
+        origin: "flag-only",
         secondTierHours,
       },
     });
