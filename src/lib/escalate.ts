@@ -152,71 +152,77 @@ export async function runMissedCheckInEscalation(now = new Date()): Promise<Esca
       ? keyHolders.map((m) => m.shortName ?? m.fullName).join(" and ")
       : "the named front-door key holders";
 
-    for (const m of fullMedical) {
-      const subject = `${adminName} has not checked in. Action plan is live.`;
-      const body = [
-        `Hi ${m.shortName ?? m.fullName},`,
-        ``,
-        `${adminName} logged ${doseInWords(log.doseMg)} of Seroquel at ${formatAuTime(log.takenAt)}.`,
-        `Expected check-in by ${formatAuTime(log.expectedCheckInBy)}. That window has now passed by approximately ${overdueHours} hours.`,
-        ``,
-        `Next step in the action plan:`,
-        `1. Call ${adminName} on ${adminPhone}.`,
-        `2. If he doesn't answer, open the live case in the portal and coordinate from there. ${keyHolderNames} hold a front-door key.`,
-        ``,
-        `Open the live case and tell the network what you found: ${caseLink(linkedCase?.id)}`,
-        ``,
-        `If you have already heard from ${adminName}, sign in and close the case so the network knows.`,
-      ].join("\n");
-      await sendEmail({
-        kind: "CHECK_IN_MISSED",
-        to: m.email,
-        toName: m.shortName ?? m.fullName,
-        subject,
-        bodyText: body,
-        metadata: { logId: log.id, caseId: linkedCase?.id ?? null },
-      });
-      result.emailsSent++;
-    }
+    // Per-row fanout is parallelized: every recipient within this row gets
+    // their notification concurrently. The outer loop over overdueLogs stays
+    // serial so caseEvent ordering and per-row audit writes remain coherent.
+    await Promise.all(
+      fullMedical.map((m) => {
+        const subject = `${adminName} has not checked in. Action plan is live.`;
+        const body = [
+          `Hi ${m.shortName ?? m.fullName},`,
+          ``,
+          `${adminName} logged ${doseInWords(log.doseMg)} of Seroquel at ${formatAuTime(log.takenAt)}.`,
+          `Expected check-in by ${formatAuTime(log.expectedCheckInBy)}. That window has now passed by approximately ${overdueHours} hours.`,
+          ``,
+          `Next step in the action plan:`,
+          `1. Call ${adminName} on ${adminPhone}.`,
+          `2. If he doesn't answer, open the live case in the portal and coordinate from there. ${keyHolderNames} hold a front-door key.`,
+          ``,
+          `Open the live case and tell the network what you found: ${caseLink(linkedCase?.id)}`,
+          ``,
+          `If you have already heard from ${adminName}, sign in and close the case so the network knows.`,
+        ].join("\n");
+        return sendEmail({
+          kind: "CHECK_IN_MISSED",
+          to: m.email,
+          toName: m.shortName ?? m.fullName,
+          subject,
+          bodyText: body,
+          metadata: { logId: log.id, caseId: linkedCase?.id ?? null },
+        });
+      }),
+    );
+    result.emailsSent += fullMedical.length;
 
-    for (const m of shared) {
-      const isKeyHolder = m.isFrontDoorKeyHolder;
-      const subject = `${adminName} is overdue checking in. Action plan is live.`;
-      const body = [
-        `Hi ${m.shortName ?? m.fullName},`,
-        ``,
-        `${adminName} has not checked in after a logged Seroquel dose. The portal has automatically moved the action plan to the next step.`,
-        ``,
-        isKeyHolder
-          ? `You hold a front-door key to ${adminName}'s apartment. Bron or Joanna will most likely call you to coordinate the welfare check. Stay reachable for the next few hours if you can.`
-          : `You don't need to do anything right now. This message exists so you know what's happening.`,
-        ``,
-        `Open the live case: ${caseLink(linkedCase?.id)}`,
-        ``,
-        `If you have already heard from ${adminName}, post a note on the case so the network knows.`,
-      ].join("\n");
-      await sendEmail({
-        kind: "CHECK_IN_MISSED",
-        to: m.email,
-        toName: m.shortName ?? m.fullName,
-        subject,
-        bodyText: body,
-        metadata: { logId: log.id, caseId: linkedCase?.id ?? null, isKeyHolder },
-      });
-      result.emailsSent++;
-    }
+    await Promise.all(
+      shared.map((m) => {
+        const isKeyHolder = m.isFrontDoorKeyHolder;
+        const subject = `${adminName} is overdue checking in. Action plan is live.`;
+        const body = [
+          `Hi ${m.shortName ?? m.fullName},`,
+          ``,
+          `${adminName} has not checked in after a logged Seroquel dose. The portal has automatically moved the action plan to the next step.`,
+          ``,
+          isKeyHolder
+            ? `You hold a front-door key to ${adminName}'s apartment. Bron or Joanna will most likely call you to coordinate the welfare check. Stay reachable for the next few hours if you can.`
+            : `You don't need to do anything right now. This message exists so you know what's happening.`,
+          ``,
+          `Open the live case: ${caseLink(linkedCase?.id)}`,
+          ``,
+          `If you have already heard from ${adminName}, post a note on the case so the network knows.`,
+        ].join("\n");
+        return sendEmail({
+          kind: "CHECK_IN_MISSED",
+          to: m.email,
+          toName: m.shortName ?? m.fullName,
+          subject,
+          bodyText: body,
+          metadata: { logId: log.id, caseId: linkedCase?.id ?? null, isKeyHolder },
+        });
+      }),
+    );
+    result.emailsSent += shared.length;
 
     const smsRecipients = [
       ...fullMedical.filter((m) => m.tier !== "ADMIN" && m.phone),
       ...keyHolders.filter((m) => m.phone),
     ];
     const smsBody = `ALERT: ${adminName} has not checked in. Action plan is live. Open: ${caseLink(linkedCase?.id)}`;
-    for (const m of smsRecipients) {
-      if (!m.phone) continue;
-      result.smsAttempted++;
-      const r = await sendSms({ to: m.phone, bodyText: smsBody });
-      if (r.ok) result.smsSent++;
-    }
+    result.smsAttempted += smsRecipients.length;
+    const smsResults = await Promise.all(
+      smsRecipients.map((m) => sendSms({ to: m.phone!, bodyText: smsBody })),
+    );
+    result.smsSent += smsResults.filter((r) => r.ok).length;
 
     await writeAudit({
       kind: "CHECK_IN_MISSED",
@@ -288,70 +294,73 @@ export async function runMissedCheckInEscalation(now = new Date()): Promise<Esca
       : "the named front-door key holders";
     const flaggerName = flag.flaggedBy.shortName ?? flag.flaggedBy.fullName;
 
-    for (const m of fullMedical) {
-      const subject = `${adminName} has not responded after a flagged distressing call.`;
-      const body = [
-        `Hi ${m.shortName ?? m.fullName},`,
-        ``,
-        `${flaggerName} flagged a distressing call with ${adminName} at ${formatAuTime(flag.flaggedAt)}.`,
-        flag.context ? `Context they shared: ${flag.context}` : "",
-        `${adminName} has not logged Seroquel and has not cleared the flag. The no-contact window has now passed by approximately ${overdueHours} hours.`,
-        ``,
-        `Next step in the action plan:`,
-        `1. Call ${adminName} on ${adminPhone}.`,
-        `2. If he doesn't answer, open the live case in the portal and coordinate from there. ${keyHolderNames} hold a front-door key.`,
-        ``,
-        `Open the live case and tell the network what you found: ${caseLink(linkedCase?.id)}`,
-        ``,
-        `If you have already heard from ${adminName}, sign in and close the case so the network knows.`,
-      ].filter((l) => l !== "").join("\n");
-      await sendEmail({
-        kind: "CHECK_IN_MISSED",
-        to: m.email,
-        toName: m.shortName ?? m.fullName,
-        subject,
-        bodyText: body,
-        metadata: { flagId: flag.id, caseId: linkedCase?.id ?? null },
-      });
-      result.emailsSent++;
-    }
+    await Promise.all(
+      fullMedical.map((m) => {
+        const subject = `${adminName} has not responded after a flagged distressing call.`;
+        const body = [
+          `Hi ${m.shortName ?? m.fullName},`,
+          ``,
+          `${flaggerName} flagged a distressing call with ${adminName} at ${formatAuTime(flag.flaggedAt)}.`,
+          flag.context ? `Context they shared: ${flag.context}` : "",
+          `${adminName} has not logged Seroquel and has not cleared the flag. The no-contact window has now passed by approximately ${overdueHours} hours.`,
+          ``,
+          `Next step in the action plan:`,
+          `1. Call ${adminName} on ${adminPhone}.`,
+          `2. If he doesn't answer, open the live case in the portal and coordinate from there. ${keyHolderNames} hold a front-door key.`,
+          ``,
+          `Open the live case and tell the network what you found: ${caseLink(linkedCase?.id)}`,
+          ``,
+          `If you have already heard from ${adminName}, sign in and close the case so the network knows.`,
+        ].filter((l) => l !== "").join("\n");
+        return sendEmail({
+          kind: "CHECK_IN_MISSED",
+          to: m.email,
+          toName: m.shortName ?? m.fullName,
+          subject,
+          bodyText: body,
+          metadata: { flagId: flag.id, caseId: linkedCase?.id ?? null },
+        });
+      }),
+    );
+    result.emailsSent += fullMedical.length;
 
-    for (const m of shared) {
-      const isKeyHolder = m.isFrontDoorKeyHolder;
-      const subject = `${adminName} has not responded after a flagged distressing call.`;
-      const body = [
-        `Hi ${m.shortName ?? m.fullName},`,
-        ``,
-        `${flaggerName} flagged a distressing call with ${adminName}. The no-contact window has now passed without a response from ${adminName}. The portal has automatically moved the action plan to the next step.`,
-        ``,
-        isKeyHolder
-          ? `You hold a front-door key to ${adminName}'s apartment. Bron or Joanna will most likely call you to coordinate the welfare check. Stay reachable for the next few hours if you can.`
-          : `You don't need to do anything right now. This message exists so you know what's happening.`,
-        ``,
-        `Open the live case: ${caseLink(linkedCase?.id)}`,
-      ].join("\n");
-      await sendEmail({
-        kind: "CHECK_IN_MISSED",
-        to: m.email,
-        toName: m.shortName ?? m.fullName,
-        subject,
-        bodyText: body,
-        metadata: { flagId: flag.id, caseId: linkedCase?.id ?? null, isKeyHolder },
-      });
-      result.emailsSent++;
-    }
+    await Promise.all(
+      shared.map((m) => {
+        const isKeyHolder = m.isFrontDoorKeyHolder;
+        const subject = `${adminName} has not responded after a flagged distressing call.`;
+        const body = [
+          `Hi ${m.shortName ?? m.fullName},`,
+          ``,
+          `${flaggerName} flagged a distressing call with ${adminName}. The no-contact window has now passed without a response from ${adminName}. The portal has automatically moved the action plan to the next step.`,
+          ``,
+          isKeyHolder
+            ? `You hold a front-door key to ${adminName}'s apartment. Bron or Joanna will most likely call you to coordinate the welfare check. Stay reachable for the next few hours if you can.`
+            : `You don't need to do anything right now. This message exists so you know what's happening.`,
+          ``,
+          `Open the live case: ${caseLink(linkedCase?.id)}`,
+        ].join("\n");
+        return sendEmail({
+          kind: "CHECK_IN_MISSED",
+          to: m.email,
+          toName: m.shortName ?? m.fullName,
+          subject,
+          bodyText: body,
+          metadata: { flagId: flag.id, caseId: linkedCase?.id ?? null, isKeyHolder },
+        });
+      }),
+    );
+    result.emailsSent += shared.length;
 
     const smsRecipients = [
       ...fullMedical.filter((m) => m.tier !== "ADMIN" && m.phone),
       ...keyHolders.filter((m) => m.phone),
     ];
     const smsBody = `ALERT: ${adminName} has not responded after a flagged call. Action plan is live. Open: ${caseLink(linkedCase?.id)}`;
-    for (const m of smsRecipients) {
-      if (!m.phone) continue;
-      result.smsAttempted++;
-      const r = await sendSms({ to: m.phone, bodyText: smsBody });
-      if (r.ok) result.smsSent++;
-    }
+    result.smsAttempted += smsRecipients.length;
+    const smsResults = await Promise.all(
+      smsRecipients.map((m) => sendSms({ to: m.phone!, bodyText: smsBody })),
+    );
+    result.smsSent += smsResults.filter((r) => r.ok).length;
 
     await writeAudit({
       kind: "CHECK_IN_MISSED",
@@ -427,72 +436,71 @@ export async function runMissedCheckInEscalation(now = new Date()): Promise<Esca
       ? `${appUrl()}/cases/${linkedCase.id}/police-script`
       : null;
 
-    for (const m of fullMedical) {
-      const subject = `URGENT: ${adminName} still has not checked in. ${secondTierHours}h since first alert.`;
-      const body = [
-        `Hi ${m.shortName ?? m.fullName},`,
-        ``,
-        `${secondTierHours} hour${secondTierHours === 1 ? "" : "s"} have passed since the first alert and no one in the network has logged a response on the case page.`,
-        ``,
-        `If you have not already done so, please attempt to contact ${adminName} on ${adminPhone} now.`,
-        `If he does not answer, the next step is a welfare check at his apartment. ${keyHolders.length ? keyHolders.map((k) => k.shortName ?? k.fullName).join(" and ") : "Front-door key holders"} hold a key.`,
-        `If you cannot reach anyone, call 000 and request a welfare check.`,
-        ``,
-        `Tell the network what you have done: ${caseLink(linkedCase?.id)}`,
-        policeScriptLink ? `` : "",
-        policeScriptLink ? `If you may need to brief police, use the prepared script: ${policeScriptLink}` : "",
-      ].filter((l) => l !== "").join("\n");
-      await sendEmail({
-        kind: "CHECK_IN_MISSED",
-        to: m.email,
-        toName: m.shortName ?? m.fullName,
-        subject,
-        bodyText: body,
-        metadata: { logId: log.id, caseId: linkedCase?.id ?? null, tier: "second" },
-      });
-      result.emailsSent++;
-    }
+    await Promise.all(
+      fullMedical.map((m) => {
+        const subject = `URGENT: ${adminName} still has not checked in. ${secondTierHours}h since first alert.`;
+        const body = [
+          `Hi ${m.shortName ?? m.fullName},`,
+          ``,
+          `${secondTierHours} hour${secondTierHours === 1 ? "" : "s"} have passed since the first alert and no one in the network has logged a response on the case page.`,
+          ``,
+          `If you have not already done so, please attempt to contact ${adminName} on ${adminPhone} now.`,
+          `If he does not answer, the next step is a welfare check at his apartment. ${keyHolders.length ? keyHolders.map((k) => k.shortName ?? k.fullName).join(" and ") : "Front-door key holders"} hold a key.`,
+          `If you cannot reach anyone, call 000 and request a welfare check.`,
+          ``,
+          `Tell the network what you have done: ${caseLink(linkedCase?.id)}`,
+          policeScriptLink ? `` : "",
+          policeScriptLink ? `If you may need to brief police, use the prepared script: ${policeScriptLink}` : "",
+        ].filter((l) => l !== "").join("\n");
+        return sendEmail({
+          kind: "CHECK_IN_MISSED",
+          to: m.email,
+          toName: m.shortName ?? m.fullName,
+          subject,
+          bodyText: body,
+          metadata: { logId: log.id, caseId: linkedCase?.id ?? null, tier: "second" },
+        });
+      }),
+    );
+    result.emailsSent += fullMedical.length;
 
-    for (const m of shared) {
-      const isKeyHolder = m.isFrontDoorKeyHolder;
-      if (!isKeyHolder) {
-        // Non-key-holder SHARED members already received the first-tier email
-        // and have no action. Skip the second-tier email to reduce noise.
-        continue;
-      }
-      const subject = `URGENT: ${adminName} still has not checked in. ${secondTierHours}h since first alert.`;
-      const body = [
-        `Hi ${m.shortName ?? m.fullName},`,
-        ``,
-        `${secondTierHours} hour${secondTierHours === 1 ? "" : "s"} have passed since the first alert and no one in the network has logged a response.`,
-        ``,
-        `You hold a front-door key. Bron or Joanna may need you for the welfare check. Stay reachable.`,
-        ``,
-        `Open the case: ${caseLink(linkedCase?.id)}`,
-        policeScriptLink ? `Police script (if needed): ${policeScriptLink}` : "",
-      ].filter((l) => l !== "").join("\n");
-      await sendEmail({
-        kind: "CHECK_IN_MISSED",
-        to: m.email,
-        toName: m.shortName ?? m.fullName,
-        subject,
-        bodyText: body,
-        metadata: { logId: log.id, caseId: linkedCase?.id ?? null, tier: "second" },
-      });
-      result.emailsSent++;
-    }
+    // Non-key-holder SHARED members already received the first-tier email
+    // and have no action. Skip the second-tier email to reduce noise.
+    await Promise.all(
+      keyHolders.map((m) => {
+        const subject = `URGENT: ${adminName} still has not checked in. ${secondTierHours}h since first alert.`;
+        const body = [
+          `Hi ${m.shortName ?? m.fullName},`,
+          ``,
+          `${secondTierHours} hour${secondTierHours === 1 ? "" : "s"} have passed since the first alert and no one in the network has logged a response.`,
+          ``,
+          `You hold a front-door key. Bron or Joanna may need you for the welfare check. Stay reachable.`,
+          ``,
+          `Open the case: ${caseLink(linkedCase?.id)}`,
+          policeScriptLink ? `Police script (if needed): ${policeScriptLink}` : "",
+        ].filter((l) => l !== "").join("\n");
+        return sendEmail({
+          kind: "CHECK_IN_MISSED",
+          to: m.email,
+          toName: m.shortName ?? m.fullName,
+          subject,
+          bodyText: body,
+          metadata: { logId: log.id, caseId: linkedCase?.id ?? null, tier: "second" },
+        });
+      }),
+    );
+    result.emailsSent += keyHolders.length;
 
     const smsRecipients = [
       ...fullMedical.filter((m) => m.tier !== "ADMIN" && m.phone),
       ...keyHolders.filter((m) => m.phone),
     ];
     const smsBody = `URGENT: ${adminName} still has not checked in. ${secondTierHours}h since first alert. Open: ${caseLink(linkedCase?.id)}`;
-    for (const m of smsRecipients) {
-      if (!m.phone) continue;
-      result.smsAttempted++;
-      const r = await sendSms({ to: m.phone, bodyText: smsBody });
-      if (r.ok) result.smsSent++;
-    }
+    result.smsAttempted += smsRecipients.length;
+    const smsResults = await Promise.all(
+      smsRecipients.map((m) => sendSms({ to: m.phone!, bodyText: smsBody })),
+    );
+    result.smsSent += smsResults.filter((r) => r.ok).length;
 
     await writeAudit({
       kind: "CHECK_IN_MISSED",
@@ -558,72 +566,71 @@ export async function runMissedCheckInEscalation(now = new Date()): Promise<Esca
       ? `${appUrl()}/cases/${linkedCase.id}/police-script`
       : null;
 
-    for (const m of fullMedical) {
-      const subject = `URGENT: ${adminName} still has not responded after the flagged call. ${secondTierHours}h since first alert.`;
-      const body = [
-        `Hi ${m.shortName ?? m.fullName},`,
-        ``,
-        `${secondTierHours} hour${secondTierHours === 1 ? "" : "s"} have passed since the first alert about the flagged distressing call and no one in the network has logged a response on the case page.`,
-        ``,
-        `If you have not already done so, please attempt to contact ${adminName} on ${adminPhone} now.`,
-        `If he does not answer, the next step is a welfare check at his apartment. ${keyHolders.length ? keyHolders.map((k) => k.shortName ?? k.fullName).join(" and ") : "Front-door key holders"} hold a key.`,
-        `If you cannot reach anyone, call 000 and request a welfare check.`,
-        ``,
-        `Tell the network what you have done: ${caseLink(linkedCase?.id)}`,
-        policeScriptLink ? `` : "",
-        policeScriptLink ? `If you may need to brief police, use the prepared script: ${policeScriptLink}` : "",
-      ].filter((l) => l !== "").join("\n");
-      await sendEmail({
-        kind: "CHECK_IN_MISSED",
-        to: m.email,
-        toName: m.shortName ?? m.fullName,
-        subject,
-        bodyText: body,
-        metadata: { flagId: flag.id, caseId: linkedCase?.id ?? null, tier: "second", origin: "flag-only" },
-      });
-      result.emailsSent++;
-    }
+    await Promise.all(
+      fullMedical.map((m) => {
+        const subject = `URGENT: ${adminName} still has not responded after the flagged call. ${secondTierHours}h since first alert.`;
+        const body = [
+          `Hi ${m.shortName ?? m.fullName},`,
+          ``,
+          `${secondTierHours} hour${secondTierHours === 1 ? "" : "s"} have passed since the first alert about the flagged distressing call and no one in the network has logged a response on the case page.`,
+          ``,
+          `If you have not already done so, please attempt to contact ${adminName} on ${adminPhone} now.`,
+          `If he does not answer, the next step is a welfare check at his apartment. ${keyHolders.length ? keyHolders.map((k) => k.shortName ?? k.fullName).join(" and ") : "Front-door key holders"} hold a key.`,
+          `If you cannot reach anyone, call 000 and request a welfare check.`,
+          ``,
+          `Tell the network what you have done: ${caseLink(linkedCase?.id)}`,
+          policeScriptLink ? `` : "",
+          policeScriptLink ? `If you may need to brief police, use the prepared script: ${policeScriptLink}` : "",
+        ].filter((l) => l !== "").join("\n");
+        return sendEmail({
+          kind: "CHECK_IN_MISSED",
+          to: m.email,
+          toName: m.shortName ?? m.fullName,
+          subject,
+          bodyText: body,
+          metadata: { flagId: flag.id, caseId: linkedCase?.id ?? null, tier: "second", origin: "flag-only" },
+        });
+      }),
+    );
+    result.emailsSent += fullMedical.length;
 
-    for (const m of shared) {
-      const isKeyHolder = m.isFrontDoorKeyHolder;
-      if (!isKeyHolder) {
-        // Non-key-holder SHARED members already received the first-tier email
-        // and have no action. Skip the second-tier email to reduce noise.
-        continue;
-      }
-      const subject = `URGENT: ${adminName} still has not responded after the flagged call. ${secondTierHours}h since first alert.`;
-      const body = [
-        `Hi ${m.shortName ?? m.fullName},`,
-        ``,
-        `${secondTierHours} hour${secondTierHours === 1 ? "" : "s"} have passed since the first alert about the flagged distressing call and no one in the network has logged a response.`,
-        ``,
-        `You hold a front-door key. Bron or Joanna may need you for the welfare check. Stay reachable.`,
-        ``,
-        `Open the case: ${caseLink(linkedCase?.id)}`,
-        policeScriptLink ? `Police script (if needed): ${policeScriptLink}` : "",
-      ].filter((l) => l !== "").join("\n");
-      await sendEmail({
-        kind: "CHECK_IN_MISSED",
-        to: m.email,
-        toName: m.shortName ?? m.fullName,
-        subject,
-        bodyText: body,
-        metadata: { flagId: flag.id, caseId: linkedCase?.id ?? null, tier: "second", origin: "flag-only" },
-      });
-      result.emailsSent++;
-    }
+    // Non-key-holder SHARED members already received the first-tier email
+    // and have no action. Skip the second-tier email to reduce noise.
+    await Promise.all(
+      keyHolders.map((m) => {
+        const subject = `URGENT: ${adminName} still has not responded after the flagged call. ${secondTierHours}h since first alert.`;
+        const body = [
+          `Hi ${m.shortName ?? m.fullName},`,
+          ``,
+          `${secondTierHours} hour${secondTierHours === 1 ? "" : "s"} have passed since the first alert about the flagged distressing call and no one in the network has logged a response.`,
+          ``,
+          `You hold a front-door key. Bron or Joanna may need you for the welfare check. Stay reachable.`,
+          ``,
+          `Open the case: ${caseLink(linkedCase?.id)}`,
+          policeScriptLink ? `Police script (if needed): ${policeScriptLink}` : "",
+        ].filter((l) => l !== "").join("\n");
+        return sendEmail({
+          kind: "CHECK_IN_MISSED",
+          to: m.email,
+          toName: m.shortName ?? m.fullName,
+          subject,
+          bodyText: body,
+          metadata: { flagId: flag.id, caseId: linkedCase?.id ?? null, tier: "second", origin: "flag-only" },
+        });
+      }),
+    );
+    result.emailsSent += keyHolders.length;
 
     const smsRecipients = [
       ...fullMedical.filter((m) => m.tier !== "ADMIN" && m.phone),
       ...keyHolders.filter((m) => m.phone),
     ];
     const smsBody = `URGENT: ${adminName} still has not responded after the flagged call. ${secondTierHours}h since first alert. Open: ${caseLink(linkedCase?.id)}`;
-    for (const m of smsRecipients) {
-      if (!m.phone) continue;
-      result.smsAttempted++;
-      const r = await sendSms({ to: m.phone, bodyText: smsBody });
-      if (r.ok) result.smsSent++;
-    }
+    result.smsAttempted += smsRecipients.length;
+    const smsResults = await Promise.all(
+      smsRecipients.map((m) => sendSms({ to: m.phone!, bodyText: smsBody })),
+    );
+    result.smsSent += smsResults.filter((r) => r.ok).length;
 
     await writeAudit({
       kind: "CHECK_IN_MISSED",

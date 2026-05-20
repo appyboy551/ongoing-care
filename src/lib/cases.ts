@@ -192,25 +192,18 @@ export async function openCaseForSeroquelLog(args: {
   });
 
   const steps = await defaultStepTemplate("SEROQUEL_LOG");
-  for (let i = 0; i < steps.length; i++) {
-    const s = steps[i];
-    await db.caseStep.create({
-      data: {
-        caseId: created.id,
-        order: i + 1,
-        stepKey: s.stepKey,
-        title: s.title,
-        description: s.description,
-        status: s.autoDone
-          ? "DONE"
-          : s.autoActive
-            ? "ACTIVE"
-            : "PENDING",
-        completedAt: s.autoDone ? args.takenAt : null,
-        completedById: s.autoDone ? args.davidMemberId : null,
-      },
-    });
-  }
+  await db.caseStep.createMany({
+    data: steps.map((s, i) => ({
+      caseId: created.id,
+      order: i + 1,
+      stepKey: s.stepKey,
+      title: s.title,
+      description: s.description,
+      status: s.autoDone ? "DONE" : s.autoActive ? "ACTIVE" : "PENDING",
+      completedAt: s.autoDone ? args.takenAt : null,
+      completedById: s.autoDone ? args.davidMemberId : null,
+    })),
+  });
   await db.caseEvent.create({
     data: {
       caseId: created.id,
@@ -238,21 +231,18 @@ export async function openCaseForCallFlag(args: {
     },
   });
   const steps = await defaultStepTemplate("DISTRESSING_CALL_FLAG");
-  for (let i = 0; i < steps.length; i++) {
-    const s = steps[i];
-    await db.caseStep.create({
-      data: {
-        caseId: created.id,
-        order: i + 1,
-        stepKey: s.stepKey,
-        title: s.title,
-        description: s.description,
-        status: s.autoDone ? "DONE" : s.autoActive ? "ACTIVE" : "PENDING",
-        completedAt: s.autoDone ? args.flaggedAt : null,
-        completedById: s.autoDone ? args.flaggedByMemberId : null,
-      },
-    });
-  }
+  await db.caseStep.createMany({
+    data: steps.map((s, i) => ({
+      caseId: created.id,
+      order: i + 1,
+      stepKey: s.stepKey,
+      title: s.title,
+      description: s.description,
+      status: s.autoDone ? "DONE" : s.autoActive ? "ACTIVE" : "PENDING",
+      completedAt: s.autoDone ? args.flaggedAt : null,
+      completedById: s.autoDone ? args.flaggedByMemberId : null,
+    })),
+  });
   await db.caseEvent.create({
     data: {
       caseId: created.id,
