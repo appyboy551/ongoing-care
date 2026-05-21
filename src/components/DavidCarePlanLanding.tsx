@@ -170,21 +170,20 @@ export default function DavidCarePlanLanding() {
             ))}
           </div>
 
-          {/* Sign in button - subtle frosted style to not compete with primary CTA */}
+          {/* Sign in button - soft purple to complement the hero blooms */}
           <button
-            className={`px-5 py-2.5 rounded-full text-sm font-semibold text-primary-ink ${transitionClass} ${hoverLiftClass} active:scale-[0.98]`}
+            className={`px-5 py-2.5 rounded-full text-sm font-semibold text-white ${transitionClass} ${hoverLiftClass} active:scale-[0.98]`}
             onMouseEnter={() => setHoveredButton("signin")}
             onMouseLeave={() => setHoveredButton(null)}
             style={{
               background:
                 hoveredButton === "signin"
-                  ? "rgba(26, 22, 18, 0.08)"
-                  : "rgba(26, 22, 18, 0.04)",
-              border: "1px solid rgba(26, 22, 18, 0.12)",
+                  ? "#7C3AED"
+                  : "#8B5CF6",
               boxShadow:
                 hoveredButton === "signin"
-                  ? "0 6px 16px rgba(26, 22, 18, 0.08)"
-                  : "none",
+                  ? "0 8px 20px rgba(139, 92, 246, 0.35)"
+                  : "0 4px 12px rgba(139, 92, 246, 0.25)",
             }}
           >
             Sign in
