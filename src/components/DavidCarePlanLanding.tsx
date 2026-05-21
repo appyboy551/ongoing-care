@@ -170,7 +170,7 @@ export default function DavidCarePlanLanding() {
             ))}
           </div>
 
-          {/* Sign in button - soft purple to complement the hero blooms */}
+          {/* Sign in button - deep purple for WCAG AA contrast (8.34:1 with white) */}
           <button
             className={`px-5 py-2.5 rounded-full text-sm font-semibold text-white ${transitionClass} ${hoverLiftClass} active:scale-[0.98]`}
             onMouseEnter={() => setHoveredButton("signin")}
@@ -178,12 +178,12 @@ export default function DavidCarePlanLanding() {
             style={{
               background:
                 hoveredButton === "signin"
-                  ? "#7C3AED"
-                  : "#8B5CF6",
+                  ? "#5B21B6"
+                  : "#6D28A8",
               boxShadow:
                 hoveredButton === "signin"
-                  ? "0 8px 20px rgba(139, 92, 246, 0.35)"
-                  : "0 4px 12px rgba(139, 92, 246, 0.25)",
+                  ? "0 8px 20px rgba(109, 40, 168, 0.4)"
+                  : "0 4px 12px rgba(109, 40, 168, 0.3)",
             }}
           >
             Sign in
