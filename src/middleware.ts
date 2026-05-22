@@ -10,6 +10,7 @@ const PUBLIC_PATHS = [
   "/api/auth/request-otp",
   "/api/auth/verify-otp",
   "/clinician", // clinician grant landing (uses its own token)
+  "/dashboard-preview", // visual design preview (no auth)
 ];
 
 export function middleware(req: NextRequest) {
