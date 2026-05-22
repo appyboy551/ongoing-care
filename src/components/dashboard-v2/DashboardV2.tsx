@@ -74,7 +74,47 @@ export default function DashboardV2() {
   const status = STATUS_CONFIGS[activeStatus];
 
   return (
-    <div className="min-h-screen" style={{ background: "#F6F4EE" }}>
+    <div className="min-h-screen relative overflow-hidden" style={{ background: "#F6F4EE" }}>
+      {/* Abstract background blooms - matching landing page aesthetic */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none" aria-hidden="true">
+        {/* Magenta bloom - top right */}
+        <div
+          className="absolute w-[600px] h-[600px] rounded-full blur-[150px] opacity-25"
+          style={{
+            background: "radial-gradient(circle, #DB2777 0%, transparent 70%)",
+            top: "-200px",
+            right: "-100px",
+          }}
+        />
+        {/* Purple bloom - center left */}
+        <div
+          className="absolute w-[700px] h-[700px] rounded-full blur-[160px] opacity-20"
+          style={{
+            background: "radial-gradient(circle, #8B5CF6 0%, transparent 70%)",
+            top: "200px",
+            left: "10%",
+          }}
+        />
+        {/* Teal bloom - bottom */}
+        <div
+          className="absolute w-[500px] h-[500px] rounded-full blur-[120px] opacity-20"
+          style={{
+            background: "radial-gradient(circle, #06B6D4 0%, transparent 70%)",
+            bottom: "-100px",
+            right: "30%",
+          }}
+        />
+        {/* Subtle warm bloom - mid right */}
+        <div
+          className="absolute w-[400px] h-[400px] rounded-full blur-[100px] opacity-15"
+          style={{
+            background: "radial-gradient(circle, #F59E0B 0%, transparent 70%)",
+            top: "50%",
+            right: "5%",
+          }}
+        />
+      </div>
+
       {/* Sidebar */}
       <Sidebar
         viewerName="Sarah"
@@ -89,9 +129,10 @@ export default function DashboardV2() {
         className="md:hidden sticky top-0 z-50 px-4 py-3"
         style={{
           background: "rgba(255, 255, 255, 0.72)",
-          backdropFilter: "blur(16px)",
-          WebkitBackdropFilter: "blur(16px)",
-          borderBottom: "1px solid #E4E0D6",
+          backdropFilter: "blur(20px)",
+          WebkitBackdropFilter: "blur(20px)",
+          borderBottom: "1px solid rgba(228, 224, 214, 0.6)",
+          boxShadow: "0 4px 20px rgba(26, 22, 18, 0.06)",
         }}
       >
         <div className="flex items-center justify-between">
@@ -113,43 +154,61 @@ export default function DashboardV2() {
       </div>
 
       {/* Main content */}
-      <main id="main-content" className="md:ml-[268px] px-4 md:px-10 py-6 md:py-9 max-w-[1100px]">
+      <main id="main-content" className="relative z-10 md:ml-[268px] px-4 md:px-10 py-6 md:py-9 max-w-[1100px]">
         {/* Page header */}
-        <header className="mb-8">
-          <div className="flex items-center gap-3 flex-wrap">
+        <header className="mb-10">
+          <div className="flex items-center gap-4 flex-wrap">
             <h1
-              className="font-serif text-[clamp(1.75rem,1.4rem+1.8vw,2.5rem)] leading-[1.1] tracking-[-0.01em]"
+              className="font-serif text-[clamp(2rem,1.6rem+2vw,3rem)] leading-[1.05] tracking-[-0.02em]"
               style={{ color: "#1A1612" }}
             >
               Hi, Sarah
             </h1>
             <span
-              className="text-[10px] font-semibold uppercase tracking-[0.06em] px-2.5 py-1 rounded-full"
-              style={{ background: "#EDE9FE", color: "#6D28A8" }}
+              className="text-[10px] font-semibold uppercase tracking-[0.08em] px-3 py-1.5 rounded-full"
+              style={{
+                background: "linear-gradient(135deg, #EDE9FE 0%, #E4DFFC 100%)",
+                color: "#6D28A8",
+                boxShadow: "0 2px 8px rgba(109, 40, 168, 0.1)",
+              }}
             >
               Network
             </span>
           </div>
-          <p className="mt-2 text-[14px]" style={{ color: "#5C594F" }}>
+          <p className="mt-3 text-[15px] leading-relaxed" style={{ color: "#5C594F" }}>
             {"A quick read of where David is right now."}
           </p>
         </header>
 
         {/* Status state selector (for demo) */}
-        <div className="mb-6 p-4 rounded-[16px] border border-dashed border-[#E4E0D6]" style={{ background: "rgba(255,255,255,0.5)" }}>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.1em] mb-3" style={{ color: "#5C594F" }}>
+        <div
+          className="mb-8 p-5 rounded-[20px]"
+          style={{
+            background: "rgba(255, 255, 255, 0.5)",
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+            border: "1px dashed rgba(228, 224, 214, 0.8)",
+            boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.5)",
+          }}
+        >
+          <div className="text-[11px] font-semibold uppercase tracking-[0.12em] mb-4" style={{ color: "#5C594F" }}>
             Demo: Select status state
           </div>
-          <div className="flex gap-2 flex-wrap">
+          <div className="flex gap-3 flex-wrap">
             {(["calm", "armed", "missed"] as const).map((state) => (
               <button
                 key={state}
                 onClick={() => setActiveStatus(state)}
-                className="px-4 py-2 rounded-full text-[13px] font-semibold transition-all duration-150"
+                className="px-5 py-2.5 rounded-full text-[13px] font-semibold transition-all duration-200"
                 style={{
-                  background: activeStatus === state ? "#1A1612" : "transparent",
+                  background: activeStatus === state
+                    ? "linear-gradient(135deg, #1A1612 0%, #2D2A26 100%)"
+                    : "rgba(255, 255, 255, 0.6)",
                   color: activeStatus === state ? "#FFFFFF" : "#5C594F",
-                  border: `1px solid ${activeStatus === state ? "#1A1612" : "#E4E0D6"}`,
+                  border: `1px solid ${activeStatus === state ? "transparent" : "rgba(228, 224, 214, 0.8)"}`,
+                  boxShadow: activeStatus === state
+                    ? "0 4px 16px rgba(26, 22, 18, 0.2)"
+                    : "0 2px 8px rgba(26, 22, 18, 0.04)",
                 }}
               >
                 {state.charAt(0).toUpperCase() + state.slice(1)}
@@ -159,7 +218,7 @@ export default function DashboardV2() {
         </div>
 
         {/* Bento grid */}
-        <section className="grid grid-cols-1 md:grid-cols-4 auto-rows-[minmax(140px,auto)] gap-4 mb-6">
+        <section className="grid grid-cols-1 md:grid-cols-4 auto-rows-[minmax(160px,auto)] gap-5 mb-8">
           {/* Status Hero - 2x2 */}
           <StatusHero
             state={activeStatus}
@@ -314,10 +373,23 @@ export default function DashboardV2() {
               {NETWORK_MEMBERS.map((member) => (
                 <div
                   key={member.id}
-                  className="flex items-center justify-between gap-3 p-3 rounded-[12px] transition-all duration-150"
+                  className="flex items-center justify-between gap-3 p-4 rounded-[14px] transition-all duration-200 cursor-pointer group"
                   style={{
-                    background: "rgba(246, 244, 238, 0.6)",
-                    border: "1px solid #E4E0D6",
+                    background: "rgba(255, 255, 255, 0.5)",
+                    backdropFilter: "blur(8px)",
+                    WebkitBackdropFilter: "blur(8px)",
+                    border: "1px solid rgba(228, 224, 214, 0.6)",
+                    boxShadow: "0 2px 8px rgba(26, 22, 18, 0.03)",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "rgba(255, 255, 255, 0.7)";
+                    e.currentTarget.style.boxShadow = "0 6px 20px rgba(26, 22, 18, 0.08)";
+                    e.currentTarget.style.transform = "translateY(-2px)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "rgba(255, 255, 255, 0.5)";
+                    e.currentTarget.style.boxShadow = "0 2px 8px rgba(26, 22, 18, 0.03)";
+                    e.currentTarget.style.transform = "translateY(0)";
                   }}
                 >
                   <div className="min-w-0">
@@ -329,10 +401,15 @@ export default function DashboardV2() {
                     </div>
                   </div>
                   <span
-                    className="text-[9px] font-semibold uppercase tracking-[0.04em] px-2 py-0.5 rounded-full flex-shrink-0"
+                    className="text-[9px] font-semibold uppercase tracking-[0.04em] px-2.5 py-1 rounded-full flex-shrink-0"
                     style={{
-                      background: member.tier === "MEDICAL" ? "#E0F7FA" : "#EDE9FE",
+                      background: member.tier === "MEDICAL"
+                        ? "linear-gradient(135deg, #E0F7FA 0%, #D0F0F6 100%)"
+                        : "linear-gradient(135deg, #EDE9FE 0%, #E4DFFC 100%)",
                       color: member.tier === "MEDICAL" ? "#0E7490" : "#6D28A8",
+                      boxShadow: member.tier === "MEDICAL"
+                        ? "0 2px 6px rgba(14, 116, 144, 0.1)"
+                        : "0 2px 6px rgba(109, 40, 168, 0.1)",
                     }}
                   >
                     {member.tier}

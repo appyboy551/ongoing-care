@@ -61,12 +61,13 @@ export default function Sidebar({
 
   return (
     <aside
-      className="hidden md:flex flex-col w-[268px] fixed h-screen overflow-y-auto p-6"
+      className="hidden md:flex flex-col w-[268px] fixed h-screen overflow-y-auto p-6 z-40"
       style={{
-        background: "rgba(255, 255, 255, 0.72)",
-        backdropFilter: "blur(20px)",
-        WebkitBackdropFilter: "blur(20px)",
-        borderRight: "1px solid #E4E0D6",
+        background: "rgba(255, 255, 255, 0.6)",
+        backdropFilter: "blur(24px)",
+        WebkitBackdropFilter: "blur(24px)",
+        borderRight: "1px solid rgba(228, 224, 214, 0.6)",
+        boxShadow: "4px 0 32px rgba(26, 22, 18, 0.04)",
       }}
     >
       {/* Brand */}

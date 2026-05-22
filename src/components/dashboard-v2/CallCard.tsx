@@ -10,15 +10,19 @@ interface CallCardProps {
 export default function CallCard({ number, label, sublabel, tone }: CallCardProps) {
   const styles = {
     emergency: {
-      bg: "linear-gradient(135deg, rgba(168, 37, 43, 0.06) 0%, rgba(168, 37, 43, 0.02) 100%)",
-      border: "rgba(168, 37, 43, 0.15)",
-      iconBg: "#A8252B",
+      bg: "linear-gradient(145deg, rgba(168, 37, 43, 0.08) 0%, rgba(168, 37, 43, 0.02) 50%, rgba(255, 255, 255, 0.5) 100%)",
+      border: "rgba(168, 37, 43, 0.12)",
+      shadow: "0 6px 20px rgba(168, 37, 43, 0.08)",
+      hoverShadow: "0 12px 32px rgba(168, 37, 43, 0.12)",
+      iconBg: "linear-gradient(135deg, #A8252B 0%, #8B1F24 100%)",
       numberColor: "#A8252B",
     },
     support: {
-      bg: "linear-gradient(135deg, rgba(190, 24, 93, 0.06) 0%, rgba(190, 24, 93, 0.02) 100%)",
-      border: "rgba(190, 24, 93, 0.15)",
-      iconBg: "#BE185D",
+      bg: "linear-gradient(145deg, rgba(190, 24, 93, 0.08) 0%, rgba(190, 24, 93, 0.02) 50%, rgba(255, 255, 255, 0.5) 100%)",
+      border: "rgba(190, 24, 93, 0.12)",
+      shadow: "0 6px 20px rgba(190, 24, 93, 0.08)",
+      hoverShadow: "0 12px 32px rgba(190, 24, 93, 0.12)",
+      iconBg: "linear-gradient(135deg, #BE185D 0%, #9D174D 100%)",
       numberColor: "#BE185D",
     },
   };
@@ -28,16 +32,29 @@ export default function CallCard({ number, label, sublabel, tone }: CallCardProp
   return (
     <a
       href={`tel:${number.replace(/\s/g, "")}`}
-      className="flex items-center gap-4 p-4 rounded-[16px] transition-all duration-150 ease-out hover:shadow-[0_6px_16px_rgba(26,22,18,0.08)] hover:-translate-y-0.5 active:translate-y-0 no-underline"
+      className="flex items-center gap-4 p-4 rounded-[16px] transition-all duration-200 ease-out no-underline group"
       style={{
         background: s.bg,
         border: `1px solid ${s.border}`,
+        borderTop: "1px solid rgba(255, 255, 255, 0.5)",
+        boxShadow: s.shadow,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.boxShadow = s.hoverShadow;
+        e.currentTarget.style.transform = "translateY(-2px)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.boxShadow = s.shadow;
+        e.currentTarget.style.transform = "translateY(0)";
       }}
     >
       {/* Phone icon */}
       <div
-        className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-        style={{ background: s.iconBg }}
+        className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0"
+        style={{
+          background: s.iconBg,
+          boxShadow: "0 4px 12px rgba(26, 22, 18, 0.15)",
+        }}
       >
         <svg
           width="18"
@@ -61,7 +78,7 @@ export default function CallCard({ number, label, sublabel, tone }: CallCardProp
         >
           {number}
         </div>
-        <div className="text-[12px] font-semibold mt-0.5" style={{ color: "#1A1612" }}>
+        <div className="text-[13px] font-semibold mt-0.5" style={{ color: "#1A1612" }}>
           {label}
         </div>
         {sublabel && (
@@ -73,15 +90,15 @@ export default function CallCard({ number, label, sublabel, tone }: CallCardProp
 
       {/* Arrow */}
       <svg
-        width="16"
-        height="16"
+        width="18"
+        height="18"
         viewBox="0 0 24 24"
         fill="none"
         stroke="#5C594F"
         strokeWidth="2"
         strokeLinecap="round"
         strokeLinejoin="round"
-        className="flex-shrink-0"
+        className="flex-shrink-0 transition-transform duration-200 group-hover:translate-x-1"
       >
         <polyline points="9 18 15 12 9 6" />
       </svg>

@@ -23,28 +23,43 @@ export default function GlassTile({ children, size = "square", className = "", h
 
   const base = `
     ${spans[size]}
-    rounded-[20px]
+    rounded-[24px]
     p-5 md:p-6
     flex flex-col
     min-h-[140px]
-    border border-[#E4E0D6]
-    transition-all duration-150 ease-out
+    transition-all duration-200 ease-out
     ${className}
   `.trim().replace(/\s+/g, " ");
 
-  // Frosted glass style
+  // Premium frosted glass style with deeper shadows
   const glassStyle = {
-    background: "rgba(255, 255, 255, 0.72)",
-    backdropFilter: "blur(16px)",
-    WebkitBackdropFilter: "blur(16px)",
+    background: "rgba(255, 255, 255, 0.65)",
+    backdropFilter: "blur(24px)",
+    WebkitBackdropFilter: "blur(24px)",
+    border: "1px solid rgba(255, 255, 255, 0.7)",
+    borderTop: "1px solid rgba(255, 255, 255, 0.9)",
+    boxShadow: "0 8px 32px rgba(26, 22, 18, 0.08), 0 2px 8px rgba(26, 22, 18, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.5)",
+  };
+
+  const hoverStyle = {
+    ...glassStyle,
+    background: "rgba(255, 255, 255, 0.75)",
+    boxShadow: "0 16px 48px rgba(26, 22, 18, 0.12), 0 4px 12px rgba(26, 22, 18, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.6)",
+    transform: "translateY(-2px)",
   };
 
   if (href) {
     return (
       <a
         href={href}
-        className={`${base} no-underline text-[#1A1612] hover:shadow-[0_8px_24px_rgba(26,22,18,0.08)] hover:-translate-y-0.5 active:translate-y-0`}
+        className={`${base} no-underline text-[#1A1612] hover:shadow-lg`}
         style={glassStyle}
+        onMouseEnter={(e) => {
+          Object.assign(e.currentTarget.style, hoverStyle);
+        }}
+        onMouseLeave={(e) => {
+          Object.assign(e.currentTarget.style, { ...glassStyle, transform: "translateY(0)" });
+        }}
       >
         {children}
       </a>
